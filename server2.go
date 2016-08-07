@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"sync"
 )
 
@@ -13,6 +14,7 @@ var count int
 func main() {
 	http.HandleFunc("/", handler)
 	http.HandleFunc("/count", counter)
+	http.HandleFunc("/lissajous", lissajous)
 	log.Fatal(http.ListenAndServe("localhost:8000", nil))
 }
 
@@ -40,4 +42,19 @@ func counter(w http.ResponseWriter, r *http.Request) {
 	mu.Lock()
 	fmt.Fprintf(w, "Count %d\n", count)
 	mu.Unlock()
+}
+
+func lissajous(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		log.Print(err)
+		fmt.Fprintf(w, "parameter error: %s", err)
+		return
+	}
+	var cycles int
+	var err error
+	if cycles, err = strconv.Atoi(r.Form.Get("cycles")); err != nil {
+		log.Print(err)
+		cycles = 5
+	}
+	Lissajous(w, cycles)
 }
