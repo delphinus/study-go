@@ -6,20 +6,23 @@ import (
 )
 
 func main() {
+	// Set up a done channel that's shared by the whole pipeline, and close
+	// that channel when this pipeline exits, as a signal for all the
+	// goroutines we started to exit.
+	done := make(chan struct{})
+	defer close(done)
+
 	in := gen(2, 3)
 
 	// Distribute the sq work across two gouroutines that both read from in.
-	c1 := sq(in)
-	c2 := sq(in)
+	c1 := sq(done, in)
+	c2 := sq(done, in)
 
 	// Consume the first value from output.
-	done := make(chan struct{}, 2)
 	out := merge(done, c1, c2)
 	fmt.Println(<-out) // 4 or 9
 
-	// Tell the remaining senders we're leaving.
-	done <- struct{}{}
-	done <- struct{}{}
+	// done will be closed by the deferred call.
 }
 
 func gen(nums ...int) <-chan int {
@@ -31,13 +34,17 @@ func gen(nums ...int) <-chan int {
 	return out
 }
 
-func sq(in <-chan int) <-chan int {
+func sq(done <-chan struct{}, in <-chan int) <-chan int {
 	out := make(chan int)
 	go func() {
+		defer close(out)
 		for n := range in {
-			out <- n * n
+			select {
+			case out <- n * n:
+			case <-done:
+				return
+			}
 		}
-		close(out)
 	}()
 	return out
 }
@@ -47,16 +54,17 @@ func merge(done <-chan struct{}, cs ...<-chan int) <-chan int {
 	out := make(chan int)
 
 	// Start an output goroutine for each input channel in cs.  output copies
-	// values from c to out until c is closed or it receives a value from done,
-	// then output calls wg.Done.
+	// values from c to out until c is closed or done is closed, then calls
+	// wg.Done.
 	output := func(c <-chan int) {
+		defer wg.Done()
 		for n := range c {
 			select {
 			case out <- n:
 			case <-done:
+				return
 			}
 		}
-		wg.Done()
 	}
 	wg.Add(len(cs))
 	for _, c := range cs {
